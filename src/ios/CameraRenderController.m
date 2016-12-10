@@ -24,10 +24,8 @@
 
     if (command.arguments.count > 3)
     {
-        CGFloat x = (CGFloat)[command.arguments[0] floatValue] +
-                    self.webView.frame.origin.x;
-        CGFloat y = (CGFloat)[command.arguments[1] floatValue] +
-                    self.webView.frame.origin.y;
+        CGFloat x = (CGFloat)[command.arguments[0] floatValue] + self.webView.frame.origin.x;
+        CGFloat y = (CGFloat)[command.arguments[1] floatValue] + self.webView.frame.origin.y;
         CGFloat width = (CGFloat)[command.arguments[2] floatValue];
         CGFloat height = (CGFloat)[command.arguments[3] floatValue];
         NSString *defaultCamera = command.arguments[4];
@@ -253,86 +251,90 @@
     [self.sessionManager.stillImageOutput
         captureStillImageAsynchronouslyFromConnection:connection
                                     completionHandler:^(CMSampleBufferRef sampleBuffer, NSError *error) {
-
-                                      NSLog(@"Still image captured");
-
-                                      if (error)
-                                      {
-                                          NSLog(@"%@", error);
-
-                                          // send the error back to JS
-                                          CDVPluginResult *pluginError = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
-                                                                                           messageAsString:error];
-                                          [pluginError setKeepCallbackAsBool:true];
-                                          [self.commandDelegate sendPluginResult:pluginError
-                                                                      callbackId:self.onPictureTakenHandlerId];
-                                          return;
-                                      }
-
-                                      NSData *imageData = [AVCaptureStillImageOutput jpegStillImageNSDataRepresentation:sampleBuffer];
-                                      UIImage *capturedImage = [[UIImage alloc] initWithData:imageData];
-
-                                      // compute the scale and ratio based on the
-                                      // supplied parameters
-                                      CGFloat scale = 1;
-                                      CGFloat ratio = 1;
-                                      if (maxHeight > 0 && maxWidth > 0)
-                                      {
-                                          CGFloat scaleHeight = maxHeight / capturedImage.size.height;
-                                          CGFloat scaleWidth = maxWidth / capturedImage.size.width;
-                                          scale = scaleHeight > scaleWidth ? scaleWidth : scaleHeight;
-                                          ratio = scaleWidth / scaleHeight;
-                                      }
-                                      else if (maxHeight > 0)
-                                      {
-                                          scale = maxHeight / capturedImage.size.height;
-                                      }
-                                      else if (maxWidth > 0)
-                                      {
-                                          scale = maxWidth / capturedImage.size.width;
-                                      }
-
-                                      // compute the radian adjustments for orientations
-                                      double radiants = [self radiansFromUIImageOrientation:capturedImage.imageOrientation];
-
-                                      // create a CIImage for manipulation
-                                      CIImage *outputImage = [[CIImage alloc] initWithCGImage:[capturedImage CGImage]];
-
-                                      // scale the image
-                                      outputImage = [outputImage imageByApplyingTransform:CGAffineTransformMakeScale(scale, scale / ratio)];
-
-                                      // rotate the image to adjust for orietnation
-                                      outputImage = [outputImage imageByApplyingTransform:CGAffineTransformMakeRotation(radiants)];
-
-                                      // create a context (if it hasn't been created already)
-                                      if (self.context == nil)
-                                      {
-                                          self.context = [CIContext contextWithOptions:nil];
-                                      }
-
-                                      // render the CI Image
-                                      CGImageRef img = [self.context createCGImage:outputImage fromRect:[outputImage extent]];
-
-                                      // create the final UI Image
-                                      UIImage *resultImage = [[UIImage alloc] initWithCGImage:img];
-
-                                      // write out the dimensions for debugging
-                                      NSLog([NSString stringWithFormat:@"(Width, Height): (%lf, %lf)",
-                                                                       resultImage.size.width * resultImage.scale, resultImage.size.height * resultImage.scale]);
-
-                                      // convert to a base 64 string
-                                      NSString *imageString = [NSString stringWithFormat:@"data:image/jpeg;base64,%@",
-                                                                                         [UIImageJPEGRepresentation(resultImage, 0.75f) base64EncodedStringWithOptions:0]];
-
-                                      // release the memory for the image
-                                      CFRelease(img);
-
-                                      // send the result back to JS
-                                      CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK
-                                                                                        messageAsString:imageString];
-                                      [pluginResult setKeepCallbackAsBool:true];
-                                      [self.commandDelegate sendPluginResult:pluginResult callbackId:self.onPictureTakenHandlerId];
+                                      [self imageCaptured:sampleBuffer:error:maxWidth:maxHeight];
                                     }];
+}
+
+- (void)imageCaptured:(CMSampleBufferRef)sampleBuffer:(NSError *)error:(CGFloat)maxWidth:(CGFloat)maxHeight
+{
+    NSLog(@"Still image captured");
+
+    if (error)
+    {
+        NSLog(@"%@", error);
+
+        // send the error back to JS
+        CDVPluginResult *pluginError = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
+                                                         messageAsString:error];
+        [pluginError setKeepCallbackAsBool:true];
+        [self.commandDelegate sendPluginResult:pluginError
+                                    callbackId:self.onPictureTakenHandlerId];
+        return;
+    }
+
+    NSData *imageData = [AVCaptureStillImageOutput jpegStillImageNSDataRepresentation:sampleBuffer];
+    UIImage *capturedImage = [[UIImage alloc] initWithData:imageData];
+
+    // compute the scale and ratio based on the
+    // supplied parameters
+    CGFloat scale = 1;
+    CGFloat ratio = 1;
+    if (maxHeight > 0 && maxWidth > 0)
+    {
+        CGFloat scaleHeight = maxHeight / capturedImage.size.height;
+        CGFloat scaleWidth = maxWidth / capturedImage.size.width;
+        scale = scaleHeight > scaleWidth ? scaleWidth : scaleHeight;
+        ratio = scaleWidth / scaleHeight;
+    }
+    else if (maxHeight > 0)
+    {
+        scale = maxHeight / capturedImage.size.height;
+    }
+    else if (maxWidth > 0)
+    {
+        scale = maxWidth / capturedImage.size.width;
+    }
+
+    // compute the radian adjustments for orientations
+    double radiants = [self radiansFromUIImageOrientation:capturedImage.imageOrientation];
+
+    // create a CIImage for manipulation
+    CIImage *outputImage = [[CIImage alloc] initWithCGImage:[capturedImage CGImage]];
+
+    // scale the image
+    outputImage = [outputImage imageByApplyingTransform:CGAffineTransformMakeScale(scale, scale / ratio)];
+
+    // rotate the image to adjust for orietnation
+    outputImage = [outputImage imageByApplyingTransform:CGAffineTransformMakeRotation(radiants)];
+
+    // create a context (if it hasn't been created already)
+    if (self.context == nil)
+    {
+        self.context = [CIContext contextWithOptions:nil];
+    }
+
+    // render the CI Image
+    CGImageRef img = [self.context createCGImage:outputImage fromRect:[outputImage extent]];
+
+    // create the final UI Image
+    UIImage *resultImage = [[UIImage alloc] initWithCGImage:img];
+
+    // write out the dimensions for debugging
+    NSLog([NSString stringWithFormat:@"(Width, Height): (%lf, %lf)",
+                                     resultImage.size.width * resultImage.scale, resultImage.size.height * resultImage.scale]);
+
+    // convert to a base 64 string
+    NSString *imageString = [NSString stringWithFormat:@"data:image/jpeg;base64,%@",
+                                                       [UIImageJPEGRepresentation(resultImage, 0.75f) base64EncodedStringWithOptions:0]];
+
+    // release the memory for the image
+    CFRelease(img);
+
+    // send the result back to JS
+    CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK
+                                                      messageAsString:imageString];
+    [pluginResult setKeepCallbackAsBool:true];
+    [self.commandDelegate sendPluginResult:pluginResult callbackId:self.onPictureTakenHandlerId];
 }
 
 - (double)radiansFromUIImageOrientation:(UIImageOrientation)orientation
