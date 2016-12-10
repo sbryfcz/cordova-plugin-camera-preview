@@ -1,22 +1,25 @@
-#import <UIKit/UIKit.h>
-#import <GLKit/GLKit.h>
 #import <AVFoundation/AVFoundation.h>
+#import <CoreImage/CoreImage.h>
 #import <CoreMedia/CoreMedia.h>
 #import <CoreVideo/CoreVideo.h>
-#import <QuartzCore/QuartzCore.h>
-#import <CoreImage/CoreImage.h>
+#import <GLKit/GLKit.h>
 #import <ImageIO/ImageIO.h>
+#import <QuartzCore/QuartzCore.h>
+#import <UIKit/UIKit.h>
 
 #import "CameraSessionManager.h"
 
 @protocol TakePictureDelegate
-- (void) invokeTakePicture;
-@end;
+- (void)invokeTakePicture;
+@end
+;
 
-@interface CameraRenderController : UIViewController <AVCaptureVideoDataOutputSampleBufferDelegate> {
-  GLuint _renderBuffer;
-  CVOpenGLESTextureCacheRef _videoTextureCache;
-  CVOpenGLESTextureRef _lumaTexture;
+@interface CameraRenderController
+    : UIViewController <AVCaptureVideoDataOutputSampleBufferDelegate>
+{
+    GLuint _renderBuffer;
+    CVOpenGLESTextureCacheRef _videoTextureCache;
+    CVOpenGLESTextureRef _lumaTexture;
 }
 
 @property (nonatomic) GLKView *view;
