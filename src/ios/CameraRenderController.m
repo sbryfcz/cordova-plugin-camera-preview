@@ -1,367 +1,238 @@
-#import <AssetsLibrary/AssetsLibrary.h>
-#import <Cordova/CDV.h>
-#import <Cordova/CDVInvokedUrlCommand.h>
-#import <Cordova/CDVPlugin.h>
+#import "CameraRenderController.h"
+#import <CoreVideo/CVOpenGLESTextureCache.h>
+#import <GLKit/GLKit.h>
+#import <OpenGLES/ES2/glext.h>
 
-#import "CameraPreview.h"
-#import <CoreGraphics/CoreGraphics.h>
+@implementation CameraRenderController
+@synthesize context = _context;
+@synthesize delegate;
 
-@implementation CameraPreview
-
-- (void)startCamera:(CDVInvokedUrlCommand *)command
+- (CameraRenderController *)init
 {
-    CDVPluginResult *pluginResult;
-
-    if (self.sessionManager != nil)
+    if (self = [super init])
     {
-        pluginResult =
-            [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
-                              messageAsString:@"Camera already started!"];
-        [self.commandDelegate sendPluginResult:pluginResult
-                                    callbackId:command.callbackId];
+        self.renderLock = [[NSLock alloc] init];
+    }
+    return self;
+}
+
+- (void)loadView
+{
+    GLKView *glkView = [[GLKView alloc] init];
+    [glkView setBackgroundColor:[UIColor blackColor]];
+    [self setView:glkView];
+}
+
+- (void)viewDidLoad
+{
+    [super viewDidLoad];
+
+    self.context = [[EAGLContext alloc] initWithAPI:kEAGLRenderingAPIOpenGLES2];
+
+    if (!self.context)
+    {
+        NSLog(@"Failed to create ES context");
+    }
+
+    CVReturn err = CVOpenGLESTextureCacheCreate(kCFAllocatorDefault, NULL, self.context, NULL, &_videoTextureCache);
+    if (err)
+    {
+        NSLog(@"Error at CVOpenGLESTextureCacheCreate %d", err);
         return;
     }
 
-    if (command.arguments.count > 3)
+    GLKView *view = (GLKView *)self.view;
+    view.context = self.context;
+    view.drawableDepthFormat = GLKViewDrawableDepthFormat24;
+    view.contentMode = UIViewContentModeScaleToFill;
+
+    glGenRenderbuffers(1, &_renderBuffer);
+    glBindRenderbuffer(GL_RENDERBUFFER, _renderBuffer);
+
+    self.ciContext = [CIContext contextWithEAGLContext:self.context];
+
+    if (self.dragEnabled)
     {
-        CGFloat x = (CGFloat)[command.arguments[0] floatValue] + self.webView.frame.origin.x;
-        CGFloat y = (CGFloat)[command.arguments[1] floatValue] + self.webView.frame.origin.y;
-        CGFloat width = (CGFloat)[command.arguments[2] floatValue];
-        CGFloat height = (CGFloat)[command.arguments[3] floatValue];
-        NSString *defaultCamera = command.arguments[4];
-        BOOL tapToTakePicture = (BOOL)[command.arguments[5] boolValue];
-        BOOL dragEnabled = (BOOL)[command.arguments[6] boolValue];
-        BOOL toBack = (BOOL)[command.arguments[7] boolValue];
-        // Create the session manager
-        self.sessionManager = [[CameraSessionManager alloc] init];
+        //add drag action listener
+        NSLog(@"Enabling view dragging");
+        UIPanGestureRecognizer *drag = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
+        [self.view addGestureRecognizer:drag];
+    }
 
-        // render controller setup
-        self.cameraRenderController = [[CameraRenderController alloc] init];
-        self.cameraRenderController.dragEnabled = dragEnabled;
-        self.cameraRenderController.tapToTakePicture = tapToTakePicture;
-        self.cameraRenderController.sessionManager = self.sessionManager;
-        self.cameraRenderController.view.frame = CGRectMake(x, y, width, height);
-        self.cameraRenderController.delegate = self;
+    if (self.tapToTakePicture)
+    {
+        //tap to take picture
+        UITapGestureRecognizer *takePictureTap =
+            [[UITapGestureRecognizer alloc] initWithTarget:self
+                                                    action:@selector(handleTakePictureTap:)];
+        [self.view addGestureRecognizer:takePictureTap];
+    }
 
-        [self.viewController addChildViewController:self.cameraRenderController];
-        // display the camera bellow the webview
-        if (toBack)
+    self.view.userInteractionEnabled = self.dragEnabled || self.tapToTakePicture;
+}
+
+- (void)viewWillAppear:(BOOL)animated
+{
+    [super viewWillAppear:animated];
+
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(appplicationIsActive:)
+                                                 name:UIApplicationDidBecomeActiveNotification
+                                               object:nil];
+
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(applicationEnteredForeground:)
+                                                 name:UIApplicationWillEnterForegroundNotification
+                                               object:nil];
+
+    dispatch_async(self.sessionManager.sessionQueue, ^{
+      NSLog(@"Starting session");
+      [self.sessionManager.session startRunning];
+    });
+}
+
+- (void)viewWillDisappear:(BOOL)animated
+{
+    [super viewWillDisappear:animated];
+
+    [[NSNotificationCenter defaultCenter] removeObserver:self
+                                                    name:UIApplicationDidBecomeActiveNotification
+                                                  object:nil];
+
+    [[NSNotificationCenter defaultCenter] removeObserver:self
+                                                    name:UIApplicationWillEnterForegroundNotification
+                                                  object:nil];
+
+    dispatch_async(self.sessionManager.sessionQueue, ^{
+      NSLog(@"Stopping session");
+      [self.sessionManager.session stopRunning];
+    });
+}
+
+- (void)handleTakePictureTap:(UITapGestureRecognizer *)recognizer
+{
+    NSLog(@"handleTakePictureTap");
+    [self.delegate invokeTakePicture];
+}
+
+- (IBAction)handlePan:(UIPanGestureRecognizer *)recognizer
+{
+    CGPoint translation = [recognizer translationInView:self.view];
+    recognizer.view.center = CGPointMake(recognizer.view.center.x + translation.x,
+                                         recognizer.view.center.y + translation.y);
+    [recognizer setTranslation:CGPointMake(0, 0) inView:self.view];
+}
+
+- (void)appplicationIsActive:(NSNotification *)notification
+{
+    dispatch_async(self.sessionManager.sessionQueue, ^{
+      NSLog(@"Starting session");
+      [self.sessionManager.session startRunning];
+    });
+}
+
+- (void)applicationEnteredForeground:(NSNotification *)notification
+{
+    dispatch_async(self.sessionManager.sessionQueue, ^{
+      NSLog(@"Stopping session");
+      [self.sessionManager.session stopRunning];
+    });
+}
+//TODO:Use TEXTURE_2D
+- (void)captureOutput:(AVCaptureOutput *)captureOutput didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer fromConnection:(AVCaptureConnection *)connection
+{
+    if ([self.renderLock tryLock])
+    {
+        CVPixelBufferRef pixelBuffer = (CVPixelBufferRef)CMSampleBufferGetImageBuffer(sampleBuffer);
+        CIImage *image = [CIImage imageWithCVPixelBuffer:pixelBuffer];
+
+        CGFloat scaleHeight = self.view.frame.size.height / image.extent.size.height;
+        CGFloat scaleWidth = self.view.frame.size.width / image.extent.size.width;
+
+        CGFloat scale, x, y;
+        if (scaleHeight < scaleWidth)
         {
-            // make transparent
-            self.webView.opaque = NO;
-            self.webView.backgroundColor = [UIColor clearColor];
-            [self.webView.superview insertSubview:self.cameraRenderController.view
-                                     belowSubview:self.webView];
+            scale = scaleWidth;
+            x = 0;
+            y = ((scale * image.extent.size.height) - self.view.frame.size.height) / 2;
         }
         else
         {
-            self.cameraRenderController.view.alpha =
-                (CGFloat)[command.arguments[8] floatValue];
-            [self.webView.superview insertSubview:self.cameraRenderController.view
-                                     aboveSubview:self.webView];
+            scale = scaleHeight;
+            x = ((scale * image.extent.size.width) - self.view.frame.size.width) / 2;
+            y = 0;
         }
 
-        // Setup session
-        self.sessionManager.delegate = self.cameraRenderController;
-        [self.sessionManager setupSession:defaultCamera];
+        // scale - translate
+        CGAffineTransform xscale = CGAffineTransformMakeScale(scale, scale);
+        CGAffineTransform xlate = CGAffineTransformMakeTranslation(-x, -y);
+        CGAffineTransform xform = CGAffineTransformConcat(xscale, xlate);
 
-        pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
-    }
-    else
-    {
-        pluginResult =
-            [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
-                              messageAsString:@"Invalid number of parameters"];
-    }
+        CIFilter *centerFilter = [CIFilter filterWithName:@"CIAffineTransform"
+                                            keysAndValues:
+                                                kCIInputImageKey, image,
+                                                kCIInputTransformKey, [NSValue valueWithBytes:&xform objCType:@encode(CGAffineTransform)],
+                                                nil];
 
-    [self.commandDelegate sendPluginResult:pluginResult
-                                callbackId:command.callbackId];
-}
+        CIImage *transformedImage = [centerFilter outputImage];
 
-- (void)stopCamera:(CDVInvokedUrlCommand *)command
-{
-    NSLog(@"stopCamera");
-    CDVPluginResult *pluginResult;
+        // crop
+        CIFilter *cropFilter = [CIFilter filterWithName:@"CICrop"];
+        CIVector *cropRect = [CIVector vectorWithX:0 Y:0 Z:self.view.frame.size.width W:self.view.frame.size.height];
+        [cropFilter setValue:transformedImage forKey:kCIInputImageKey];
+        [cropFilter setValue:cropRect forKey:@"inputRectangle"];
+        CIImage *croppedImage = [cropFilter outputImage];
 
-    if (self.sessionManager != nil)
-    {
-        [self.cameraRenderController.view removeFromSuperview];
-        [self.cameraRenderController removeFromParentViewController];
-        self.cameraRenderController = nil;
-
-        [self.sessionManager.session stopRunning];
-        self.sessionManager = nil;
-
-        pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
-    }
-    else
-    {
-        pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
-                                         messageAsString:@"Camera not started"];
-    }
-
-    [self.commandDelegate sendPluginResult:pluginResult
-                                callbackId:command.callbackId];
-}
-
-- (void)hideCamera:(CDVInvokedUrlCommand *)command
-{
-    NSLog(@"hideCamera");
-    CDVPluginResult *pluginResult;
-
-    if (self.cameraRenderController != nil)
-    {
-        [self.cameraRenderController.view setHidden:YES];
-        pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
-    }
-    else
-    {
-        pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
-                                         messageAsString:@"Camera not started"];
-    }
-
-    [self.commandDelegate sendPluginResult:pluginResult
-                                callbackId:command.callbackId];
-}
-
-- (void)showCamera:(CDVInvokedUrlCommand *)command
-{
-    NSLog(@"showCamera");
-    CDVPluginResult *pluginResult;
-
-    if (self.cameraRenderController != nil)
-    {
-        [self.cameraRenderController.view setHidden:NO];
-        pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
-    }
-    else
-    {
-        pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
-                                         messageAsString:@"Camera not started"];
-    }
-
-    [self.commandDelegate sendPluginResult:pluginResult
-                                callbackId:command.callbackId];
-}
-
-- (void)switchCamera:(CDVInvokedUrlCommand *)command
-{
-    NSLog(@"switchCamera");
-    CDVPluginResult *pluginResult;
-
-    if (self.sessionManager != nil)
-    {
-        [self.sessionManager switchCamera];
-        pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
-    }
-    else
-    {
-        pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
-                                         messageAsString:@"Camera not started"];
-    }
-
-    [self.commandDelegate sendPluginResult:pluginResult
-                                callbackId:command.callbackId];
-}
-
-- (void)setFlashMode:(CDVInvokedUrlCommand *)command
-{
-    NSLog(@"Flash Mode");
-    CDVPluginResult *pluginResult;
-
-    NSInteger flashMode;
-    NSString *errMsg;
-
-    if (command.arguments.count <= 0)
-    {
-        errMsg = @"Please specify a flash mode";
-    }
-    else
-    {
-        NSString *strFlashMode = [command.arguments objectAtIndex:0];
-        flashMode = [strFlashMode integerValue];
-        if (flashMode != AVCaptureFlashModeOff &&
-            flashMode != AVCaptureFlashModeOn &&
-            flashMode != AVCaptureFlashModeAuto)
+        //fix front mirroring
+        if (self.sessionManager.defaultCamera == AVCaptureDevicePositionFront)
         {
-            errMsg = @"Invalid parameter";
+            CGAffineTransform matrix = CGAffineTransformTranslate(CGAffineTransformMakeScale(-1, 1), 0, croppedImage.extent.size.height);
+            croppedImage = [croppedImage imageByApplyingTransform:matrix];
         }
-    }
 
-    if (errMsg)
-    {
-        NSLog(@"%@", errMsg);
-    }
-    else
-    {
-        if (self.sessionManager != nil)
+        self.latestFrame = croppedImage;
+
+        CGFloat pointScale;
+        if ([[UIScreen mainScreen] respondsToSelector:@selector(nativeScale)])
         {
-            [self.sessionManager setFlashMode:flashMode];
-            pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
+            pointScale = [[UIScreen mainScreen] nativeScale];
         }
         else
         {
-            pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
-                                             messageAsString:@"Camera not started"];
+            pointScale = [[UIScreen mainScreen] scale];
         }
-    }
+        CGRect dest = CGRectMake(0, 0, self.view.frame.size.width * pointScale, self.view.frame.size.height * pointScale);
 
-    [self.commandDelegate sendPluginResult:pluginResult
-                                callbackId:command.callbackId];
+        [self.ciContext drawImage:croppedImage inRect:dest fromRect:[croppedImage extent]];
+        [self.context presentRenderbuffer:GL_RENDERBUFFER];
+        [(GLKView *)(self.view)display];
+        [self.renderLock unlock];
+    }
 }
 
-- (void)takePicture:(CDVInvokedUrlCommand *)command
+- (void)viewDidUnload
 {
-    NSLog(@"takePicture");
-    CDVPluginResult *pluginResult;
+    [super viewDidUnload];
 
-    if (self.cameraRenderController != NULL)
+    if ([EAGLContext currentContext] == self.context)
     {
-        CGFloat maxW = (CGFloat)[command.arguments[0] floatValue];
-        CGFloat maxH = (CGFloat)[command.arguments[1] floatValue];
-        [self invokeTakePicture:maxW withHeight:maxH];
+        [EAGLContext setCurrentContext:nil];
     }
-    else
-    {
-        pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
-                                         messageAsString:@"Camera not started"];
-        [self.commandDelegate sendPluginResult:pluginResult
-                                    callbackId:command.callbackId];
-    }
+    self.context = nil;
 }
 
-- (void)setOnPictureTakenHandler:(CDVInvokedUrlCommand *)command
+- (void)didReceiveMemoryWarning
 {
-    NSLog(@"setOnPictureTakenHandler");
-    self.onPictureTakenHandlerId = command.callbackId;
+    [super didReceiveMemoryWarning];
+    // Release any cached data, images, etc. that aren't in use.
 }
 
-- (void)invokeTakePicture
+- (BOOL)shouldAutorotate
 {
-    [self invokeTakePicture:0.0 withHeight:0.0];
+    return YES;
 }
-
-- (void)invokeTakePicture:(CGFloat)maxWidth withHeight:(CGFloat)maxHeight
+- (void)willRotateToInterfaceOrientation:(UIInterfaceOrientation)toInterfaceOrientation duration:(NSTimeInterval)duration
 {
-    AVCaptureConnection *connection = [self.sessionManager.stillImageOutput
-        connectionWithMediaType:AVMediaTypeVideo];
-
-    NSLog([NSString stringWithFormat:@"(maxWidth, maxHeight): (%f, %f)", maxWidth, maxHeight]);
-
-    [self.sessionManager.stillImageOutput
-        captureStillImageAsynchronouslyFromConnection:connection
-                                    completionHandler:^(CMSampleBufferRef sampleBuffer, NSError *error) {
-                                      [self imageCaptured:sampleBuffer:error:maxWidth:maxHeight];
-                                    }];
+    [self.sessionManager updateOrientation:[self.sessionManager getCurrentOrientation:toInterfaceOrientation]];
 }
-
-- (void)imageCaptured:(CMSampleBufferRef)sampleBuffer:(NSError *)error:(CGFloat)maxWidth:(CGFloat)maxHeight
-{
-    NSLog(@"Still image captured");
-
-    if (error)
-    {
-        NSLog(@"%@", error);
-
-        // send the error back to JS
-        CDVPluginResult *pluginError = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
-                                                         messageAsString:error];
-        [pluginError setKeepCallbackAsBool:true];
-        [self.commandDelegate sendPluginResult:pluginError
-                                    callbackId:self.onPictureTakenHandlerId];
-        return;
-    }
-
-    NSData *imageData = [AVCaptureStillImageOutput jpegStillImageNSDataRepresentation:sampleBuffer];
-    UIImage *capturedImage = [[UIImage alloc] initWithData:imageData];
-
-    // compute the scale and ratio based on the
-    // supplied parameters
-    CGFloat scale = 1;
-    CGFloat ratio = 1;
-    if (maxHeight > 0 && maxWidth > 0)
-    {
-        CGFloat scaleHeight = maxHeight / capturedImage.size.height;
-        CGFloat scaleWidth = maxWidth / capturedImage.size.width;
-        scale = scaleHeight > scaleWidth ? scaleWidth : scaleHeight;
-        ratio = scaleWidth / scaleHeight;
-    }
-    else if (maxHeight > 0)
-    {
-        scale = maxHeight / capturedImage.size.height;
-    }
-    else if (maxWidth > 0)
-    {
-        scale = maxWidth / capturedImage.size.width;
-    }
-
-    // compute the radian adjustments for orientations
-    double radiants = [self radiansFromUIImageOrientation:capturedImage.imageOrientation];
-
-    // create a CIImage for manipulation
-    CIImage *outputImage = [[CIImage alloc] initWithCGImage:[capturedImage CGImage]];
-
-    // scale the image
-    outputImage = [outputImage imageByApplyingTransform:CGAffineTransformMakeScale(scale, scale / ratio)];
-
-    // rotate the image to adjust for orietnation
-    outputImage = [outputImage imageByApplyingTransform:CGAffineTransformMakeRotation(radiants)];
-
-    // create a context (if it hasn't been created already)
-    if (self.context == nil)
-    {
-        self.context = [CIContext contextWithOptions:nil];
-    }
-
-    // render the CI Image
-    CGImageRef img = [self.context createCGImage:outputImage fromRect:[outputImage extent]];
-
-    // create the final UI Image
-    UIImage *resultImage = [[UIImage alloc] initWithCGImage:img];
-
-    // write out the dimensions for debugging
-    NSLog([NSString stringWithFormat:@"(Width, Height): (%lf, %lf)",
-                                     resultImage.size.width * resultImage.scale, resultImage.size.height * resultImage.scale]);
-
-    // convert to a base 64 string
-    NSString *imageString = [NSString stringWithFormat:@"data:image/jpeg;base64,%@",
-                                                       [UIImageJPEGRepresentation(resultImage, 0.75f) base64EncodedStringWithOptions:0]];
-
-    // release the memory for the image
-    CFRelease(img);
-
-    // send the result back to JS
-    CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK
-                                                      messageAsString:imageString];
-    [pluginResult setKeepCallbackAsBool:true];
-    [self.commandDelegate sendPluginResult:pluginResult callbackId:self.onPictureTakenHandlerId];
-}
-
-- (double)radiansFromUIImageOrientation:(UIImageOrientation)orientation
-{
-    double radians;
-
-    switch (orientation)
-    {
-        case UIImageOrientationUp:
-        case UIImageOrientationUpMirrored:
-            radians = 0.0f;
-            break;
-        case UIImageOrientationLeft:
-        case UIImageOrientationLeftMirrored:
-            radians = -M_PI_2;
-            break;
-        case UIImageOrientationRight:
-        case UIImageOrientationRightMirrored:
-            radians = M_PI_2;
-            break;
-        case UIImageOrientationDown:
-        case UIImageOrientationDownMirrored:
-            radians = -M_PI;
-            break;
-    }
-
-    return radians;
-}
-
 @end

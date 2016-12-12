@@ -24,10 +24,8 @@
 
     if (command.arguments.count > 3)
     {
-        CGFloat x = (CGFloat)[command.arguments[0] floatValue] +
-                    self.webView.frame.origin.x;
-        CGFloat y = (CGFloat)[command.arguments[1] floatValue] +
-                    self.webView.frame.origin.y;
+        CGFloat x = (CGFloat)[command.arguments[0] floatValue] + self.webView.frame.origin.x;
+        CGFloat y = (CGFloat)[command.arguments[1] floatValue] + self.webView.frame.origin.y;
         CGFloat width = (CGFloat)[command.arguments[2] floatValue];
         CGFloat height = (CGFloat)[command.arguments[3] floatValue];
         NSString *defaultCamera = command.arguments[4];
@@ -248,15 +246,16 @@
     AVCaptureConnection *connection = [self.sessionManager.stillImageOutput
         connectionWithMediaType:AVMediaTypeVideo];
 
-    NSLog([NSString stringWithFormat:@"(maxWidth, maxHeight): (%f, %f)", maxWidth,
-                                     maxHeight]);
+    NSLog([NSString stringWithFormat:@"(maxWidth, maxHeight): (%f, %f)", maxWidth, maxHeight]);
 
     [self.sessionManager.stillImageOutput
-        captureStillImageAsynchronouslyFromConnection: connection
-                                    completionHandler: self.stillImageCaptured)];
+        captureStillImageAsynchronouslyFromConnection:connection
+                                    completionHandler:^(CMSampleBufferRef sampleBuffer, NSError *error) {
+                                      [self imageCaptured:sampleBuffer:error:maxWidth:maxHeight];
+                                    }];
 }
 
-- (void)stillImageCaptured:(CMSampleBufferRef)sampleBuffer:(NSError *)error
+- (void)imageCaptured:(CMSampleBufferRef)sampleBuffer:(NSError *)error:(CGFloat)maxWidth:(CGFloat)maxHeight
 {
     NSLog(@"Still image captured");
 
@@ -266,8 +265,8 @@
 
         // send the error back to JS
         CDVPluginResult *pluginError = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
-                                                         messageAsString:imageString];
-        [pluginResult setKeepCallbackAsBool:true];
+                                                         messageAsString:error];
+        [pluginError setKeepCallbackAsBool:true];
         [self.commandDelegate sendPluginResult:pluginError
                                     callbackId:self.onPictureTakenHandlerId];
         return;
@@ -336,7 +335,6 @@
                                                       messageAsString:imageString];
     [pluginResult setKeepCallbackAsBool:true];
     [self.commandDelegate sendPluginResult:pluginResult callbackId:self.onPictureTakenHandlerId];
-}];
 }
 
 - (double)radiansFromUIImageOrientation:(UIImageOrientation)orientation
