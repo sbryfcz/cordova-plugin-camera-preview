@@ -243,6 +243,9 @@
                                          [self.session addOutput:dataOutput];
                                      }
 
+                                     NSLog(@"Starting session");
+                                     [self.session startRunning];
+
                                      [self updateOrientation:[self getCurrentOrientation]];
                                    });
                                }
