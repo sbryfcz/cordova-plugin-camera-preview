@@ -43,64 +43,19 @@
 }
 - (void)setupSession:(NSString *)defaultCamera
 {
+    NSLog(@"defaultCamera: %@", defaultCamera);
+    if ([defaultCamera isEqual:@"front"])
+    {
+        self.defaultCamera = AVCaptureDevicePositionFront;
+    }
+    else
+    {
+        self.defaultCamera = AVCaptureDevicePositionBack;
+    }
+
     // If this fails, video input will just stream blank frames
     // and the user will be notified. User only has to accep once.
     [self checkDeviceAuthorizationStatus];
-
-    dispatch_async(self.sessionQueue, ^{
-      NSError *error = nil;
-
-      NSLog(@"defaultCamera: %@", defaultCamera);
-      if ([defaultCamera isEqual:@"front"])
-      {
-          self.defaultCamera = AVCaptureDevicePositionFront;
-      }
-      else
-      {
-          self.defaultCamera = AVCaptureDevicePositionBack;
-      }
-
-      self.defaultFlashMode = AVCaptureFlashModeAuto;
-
-      self.device = [self cameraWithPosition:self.defaultCamera];
-
-      [self updateFlashMode];
-
-      AVCaptureDeviceInput *videoDeviceInput = [AVCaptureDeviceInput deviceInputWithDevice:self.device error:&error];
-
-      if (error)
-      {
-          NSLog(@"%@", error);
-      }
-
-      if ([self.session canAddInput:videoDeviceInput])
-      {
-          [self.session addInput:videoDeviceInput];
-          self.videoDeviceInput = videoDeviceInput;
-      }
-
-      AVCaptureStillImageOutput *stillImageOutput = [[AVCaptureStillImageOutput alloc] init];
-      if ([self.session canAddOutput:stillImageOutput])
-      {
-          [self.session addOutput:stillImageOutput];
-          [stillImageOutput setOutputSettings:@{AVVideoCodecKey : AVVideoCodecJPEG}];
-          self.stillImageOutput = stillImageOutput;
-      }
-
-      AVCaptureVideoDataOutput *dataOutput = [[AVCaptureVideoDataOutput alloc] init];
-      if ([self.session canAddOutput:dataOutput])
-      {
-          self.dataOutput = dataOutput;
-          [dataOutput setAlwaysDiscardsLateVideoFrames:YES];
-          [dataOutput setVideoSettings:[NSDictionary dictionaryWithObject:[NSNumber numberWithInt:kCVPixelFormatType_32BGRA] forKey:(id)kCVPixelBufferPixelFormatTypeKey]];
-
-          [dataOutput setSampleBufferDelegate:self.delegate queue:self.sessionQueue];
-
-          [self.session addOutput:dataOutput];
-      }
-
-      [self updateOrientation:[self getCurrentOrientation]];
-    });
 }
 
 - (void)updateOrientation:(AVCaptureVideoOrientation)orientation
@@ -242,6 +197,53 @@
                                                                 delegate:self
                                                        cancelButtonTitle:@"OK"
                                                        otherButtonTitles:nil] show];
+                                   });
+                               }
+                               else
+                               {
+                                   dispatch_async(self.sessionQueue, ^{
+                                     NSError *error = nil;
+
+                                     self.defaultFlashMode = AVCaptureFlashModeAuto;
+
+                                     self.device = [self cameraWithPosition:self.defaultCamera];
+
+                                     [self updateFlashMode];
+
+                                     AVCaptureDeviceInput *videoDeviceInput = [AVCaptureDeviceInput deviceInputWithDevice:self.device error:&error];
+
+                                     if (error)
+                                     {
+                                         NSLog(@"%@", error);
+                                     }
+
+                                     if ([self.session canAddInput:videoDeviceInput])
+                                     {
+                                         [self.session addInput:videoDeviceInput];
+                                         self.videoDeviceInput = videoDeviceInput;
+                                     }
+
+                                     AVCaptureStillImageOutput *stillImageOutput = [[AVCaptureStillImageOutput alloc] init];
+                                     if ([self.session canAddOutput:stillImageOutput])
+                                     {
+                                         [self.session addOutput:stillImageOutput];
+                                         [stillImageOutput setOutputSettings:@{AVVideoCodecKey : AVVideoCodecJPEG}];
+                                         self.stillImageOutput = stillImageOutput;
+                                     }
+
+                                     AVCaptureVideoDataOutput *dataOutput = [[AVCaptureVideoDataOutput alloc] init];
+                                     if ([self.session canAddOutput:dataOutput])
+                                     {
+                                         self.dataOutput = dataOutput;
+                                         [dataOutput setAlwaysDiscardsLateVideoFrames:YES];
+                                         [dataOutput setVideoSettings:[NSDictionary dictionaryWithObject:[NSNumber numberWithInt:kCVPixelFormatType_32BGRA] forKey:(id)kCVPixelBufferPixelFormatTypeKey]];
+
+                                         [dataOutput setSampleBufferDelegate:self.delegate queue:self.sessionQueue];
+
+                                         [self.session addOutput:dataOutput];
+                                     }
+
+                                     [self updateOrientation:[self getCurrentOrientation]];
                                    });
                                }
                              }];
