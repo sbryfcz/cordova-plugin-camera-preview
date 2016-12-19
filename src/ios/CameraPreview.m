@@ -230,15 +230,40 @@
     }
 }
 
+- (void)takeQuickPicture:(CDVInvokedUrlCommand *)command
+{
+    NSLog(@"takeQuickPicture");
+    CDVPluginResult *pluginResult;
+
+    if (self.cameraRenderController != NULL)
+    {
+        CGFloat maxW = (CGFloat)[command.arguments[0] floatValue];
+        CGFloat maxH = (CGFloat)[command.arguments[1] floatValue];
+        [self invokeTakeQuickPicture:maxW withHeight:maxH];
+    }
+    else
+    {
+        pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR
+                                         messageAsString:@"Camera not started"];
+        [self.commandDelegate sendPluginResult:pluginResult
+                                    callbackId:command.callbackId];
+    }
+}
+
 - (void)setOnPictureTakenHandler:(CDVInvokedUrlCommand *)command
 {
     NSLog(@"setOnPictureTakenHandler");
     self.onPictureTakenHandlerId = command.callbackId;
 }
 
-- (void)invokeTakePicture
+- (void)invokeTakeQuickPicture:(CGFloat)maxWidth withHeight:(CGFloat)maxHeight
 {
-    [self invokeTakePicture:0.0 withHeight:0.0];
+    NSLog(@"Quick image captured");
+
+    // grab the latest raw frame from the renderController (this saves time and memory)
+    CIImage *outputImage = self.cameraRenderController.latestRawFrame;
+
+    [self imageCaptured:outputImage:maxWidth:maxHeight:0];
 }
 
 - (void)invokeTakePicture:(CGFloat)maxWidth withHeight:(CGFloat)maxHeight
@@ -274,32 +299,35 @@
 
     NSData *imageData = [AVCaptureStillImageOutput jpegStillImageNSDataRepresentation:sampleBuffer];
     UIImage *capturedImage = [[UIImage alloc] initWithData:imageData];
+    CIImage *outputImage = [[CIImage alloc] initWithCGImage:[capturedImage CGImage]];
+    double radiants = [self radiansFromUIImageOrientation:capturedImage.imageOrientation];
 
+    [self imageCaptured:outputImage:maxWidth:maxHeight:radiants];
+}
+
+- (void)imageCaptured:(CIImage *)outputImage:(CGFloat)maxWidth:(CGFloat)maxHeight:(CGFloat)radiants
+{
     // compute the scale and ratio based on the
     // supplied parameters
+    CGFloat imageHeight = outputImage.extent.size.height;
+    CGFloat imageWidth = outputImage.extent.size.height;
     CGFloat scale = 1;
     CGFloat ratio = 1;
     if (maxHeight > 0 && maxWidth > 0)
     {
-        CGFloat scaleHeight = maxHeight / capturedImage.size.height;
-        CGFloat scaleWidth = maxWidth / capturedImage.size.width;
+        CGFloat scaleHeight = maxHeight / imageHeight;
+        CGFloat scaleWidth = maxWidth / imageWidth;
         scale = scaleHeight > scaleWidth ? scaleWidth : scaleHeight;
         ratio = scaleWidth / scaleHeight;
     }
     else if (maxHeight > 0)
     {
-        scale = maxHeight / capturedImage.size.height;
+        scale = maxHeight / imageHeight;
     }
     else if (maxWidth > 0)
     {
-        scale = maxWidth / capturedImage.size.width;
+        scale = maxWidth / imageWidth;
     }
-
-    // compute the radian adjustments for orientations
-    double radiants = [self radiansFromUIImageOrientation:capturedImage.imageOrientation];
-
-    // create a CIImage for manipulation
-    CIImage *outputImage = [[CIImage alloc] initWithCGImage:[capturedImage CGImage]];
 
     // scale the image
     outputImage = [outputImage imageByApplyingTransform:CGAffineTransformMakeScale(scale, scale / ratio)];

@@ -25,7 +25,7 @@
 @property (nonatomic) GLKView *view;
 @property (nonatomic) CameraSessionManager *sessionManager;
 @property (nonatomic) CIContext *ciContext;
-@property (nonatomic) CIImage *latestFrame;
+@property (nonatomic) CIImage *latestRawFrame;
 @property (nonatomic) EAGLContext *context;
 @property (nonatomic) NSLock *renderLock;
 @property BOOL dragEnabled;

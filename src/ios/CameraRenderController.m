@@ -146,6 +146,8 @@
         CVPixelBufferRef pixelBuffer = (CVPixelBufferRef)CMSampleBufferGetImageBuffer(sampleBuffer);
         CIImage *image = [CIImage imageWithCVPixelBuffer:pixelBuffer];
 
+        self.latestRawFrame = image;
+
         CGFloat scaleHeight = self.view.frame.size.height / image.extent.size.height;
         CGFloat scaleWidth = self.view.frame.size.width / image.extent.size.width;
 
@@ -189,8 +191,6 @@
             CGAffineTransform matrix = CGAffineTransformTranslate(CGAffineTransformMakeScale(-1, 1), 0, croppedImage.extent.size.height);
             croppedImage = [croppedImage imageByApplyingTransform:matrix];
         }
-
-        self.latestFrame = croppedImage;
 
         CGFloat pointScale;
         if ([[UIScreen mainScreen] respondsToSelector:@selector(nativeScale)])
