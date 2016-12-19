@@ -18,7 +18,6 @@
 - (void)setOnPictureTakenHandler:(CDVInvokedUrlCommand *)command;
 
 - (void)invokeTakePicture:(CGFloat)maxWidth withHeight:(CGFloat)maxHeight;
-- (void)invokeTakePicture;
 
 @property (nonatomic) CameraSessionManager *sessionManager;
 @property (nonatomic) CameraRenderController *cameraRenderController;

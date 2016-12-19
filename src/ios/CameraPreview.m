@@ -276,11 +276,11 @@
     [self.sessionManager.stillImageOutput
         captureStillImageAsynchronouslyFromConnection:connection
                                     completionHandler:^(CMSampleBufferRef sampleBuffer, NSError *error) {
-                                      [self imageCaptured:sampleBuffer:error:maxWidth:maxHeight];
+                                      [self stillImageCaptured:sampleBuffer:error:maxWidth:maxHeight];
                                     }];
 }
 
-- (void)imageCaptured:(CMSampleBufferRef)sampleBuffer:(NSError *)error:(CGFloat)maxWidth:(CGFloat)maxHeight
+- (void)stillImageCaptured:(CMSampleBufferRef)sampleBuffer:(NSError *)error:(CGFloat)maxWidth:(CGFloat)maxHeight
 {
     NSLog(@"Still image captured");
 
